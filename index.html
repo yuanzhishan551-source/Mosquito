@@ -182,6 +182,7 @@
                 this.buzzingGain = null;
                 this.buzzingAudioBuffer = null;
                 this.zapAudioBuffer = null; // 电击音效
+                this.zapSource = null; // 当前播放的电击音效source
                 this.lastZapTime = 0; // 上次播放电击音效的时间
                 this.zapCooldown = 200; // 电击音效冷却时间（毫秒）
 
@@ -356,10 +357,15 @@
             playZapSound() {
                 if (!this.audioContext || !this.zapAudioBuffer) return;
 
-                // 检查冷却时间，避免重复播放
-                const now = Date.now();
-                if (now - this.lastZapTime < this.zapCooldown) return;
-                this.lastZapTime = now;
+                // 停止之前的音效，避免叠加
+                if (this.zapSource) {
+                    try {
+                        this.zapSource.stop();
+                    } catch (e) {
+                        // Source already stopped
+                    }
+                    this.zapSource = null;
+                }
 
                 const source = this.audioContext.createBufferSource();
                 const gainNode = this.audioContext.createGain();
@@ -370,6 +376,14 @@
 
                 source.connect(gainNode);
                 gainNode.connect(this.audioContext.destination);
+
+                // 保存source引用
+                this.zapSource = source;
+
+                // 音效播放完后清除引用
+                source.onended = () => {
+                    this.zapSource = null;
+                };
 
                 source.start();
             }
@@ -760,7 +774,10 @@
                 this.ctx.fillStyle = '#000';
                 this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-                if (this.state === GAME_STATE.LOADING || this.state === GAME_STATE.BLACK_SCREEN) {
+                // 在 LOADING、BLACK_SCREEN、BUZZING 状态时只显示黑屏
+                if (this.state === GAME_STATE.LOADING ||
+                    this.state === GAME_STATE.BLACK_SCREEN ||
+                    this.state === GAME_STATE.BUZZING) {
                     return;
                 }
 
