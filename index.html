@@ -136,12 +136,13 @@
             insecticideHeight: 477,
             insecticideRotation: 21.01,
             mosquitoCount: 1,  // 只有一只蚊子
-            mosquitoSize: 40,
+            mosquitoSize: 60,  // 蚊子大小（黑点）
             mosquitoSpeed: 2,
-            clapThreshold: 150, // Distance threshold for clap detection
+            clapThreshold: 250, // Distance threshold for clap detection (增加了)
             clapSpeedThreshold: 300, // Speed threshold for clap (pixels/frame)
             sprayDistance: 200, // Distance to grab insecticide
-            gameRestartDelay: 2000
+            gameRestartDelay: 2000,
+            clapKillRadius: 250  // 拍击杀死半径（增加了）
         };
 
         // Game state
@@ -174,8 +175,9 @@
                 this.isHoldingInsecticide = false;
                 this.eyeOpenProgress = 0;
                 this.audioContext = null;
-                this.buzzingOscillator = null;
+                this.buzzingSource = null;
                 this.buzzingGain = null;
+                this.buzzingAudioBuffer = null;
 
                 this.resizeCanvas();
                 window.addEventListener('resize', () => this.resizeCanvas());
@@ -239,65 +241,97 @@
                 });
             }
 
-            setupAudio() {
+            async setupAudio() {
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                // Load buzzing sound from audio file
+                try {
+                    const response = await fetch('399549__soundslikewillem__electric-mosquito-killer-bat.wav');
+                    const arrayBuffer = await response.arrayBuffer();
+                    this.buzzingAudioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                    console.log('Audio loaded successfully');
+                } catch (error) {
+                    console.error('Failed to load audio file:', error);
+                    // Fallback to synthesized sound if file not found
+                    this.buzzingAudioBuffer = null;
+                }
             }
 
-            // Create buzzing sound using Web Audio API - loops until stopped
+            // Play buzzing sound with varying volume (near/far effect)
             playBuzzingSound() {
                 if (!this.audioContext) return;
 
                 // Stop existing sound if any
                 this.stopBuzzingSound();
 
-                // Create oscillator for buzzing sound
-                this.buzzingOscillator = this.audioContext.createOscillator();
-                this.buzzingGain = this.audioContext.createGain();
+                if (this.buzzingAudioBuffer) {
+                    // Use loaded audio file
+                    this.buzzingSource = this.audioContext.createBufferSource();
+                    this.buzzingGain = this.audioContext.createGain();
 
-                this.buzzingOscillator.type = 'sawtooth';
-                this.buzzingOscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
+                    this.buzzingSource.buffer = this.buzzingAudioBuffer;
+                    this.buzzingSource.loop = true;
 
-                // Create a pulsing effect
-                this.buzzingGain.gain.setValueAtTime(0.1, this.audioContext.currentTime);
+                    // Start with medium volume
+                    this.buzzingGain.gain.setValueAtTime(0.3, this.audioContext.currentTime);
 
-                this.buzzingOscillator.connect(this.buzzingGain);
-                this.buzzingGain.connect(this.audioContext.destination);
+                    this.buzzingSource.connect(this.buzzingGain);
+                    this.buzzingGain.connect(this.audioContext.destination);
 
-                this.buzzingOscillator.start();
+                    this.buzzingSource.start();
 
-                // Add frequency variation for realistic buzzing
-                this.buzzFrequencyVariation();
+                    // Add volume variation for near/far effect
+                    this.buzzVolumeVariation();
+                } else {
+                    // Fallback to synthesized sound
+                    this.buzzingSource = this.audioContext.createOscillator();
+                    this.buzzingGain = this.audioContext.createGain();
+
+                    this.buzzingSource.type = 'sawtooth';
+                    this.buzzingSource.frequency.setValueAtTime(200, this.audioContext.currentTime);
+                    this.buzzingGain.gain.setValueAtTime(0.1, this.audioContext.currentTime);
+
+                    this.buzzingSource.connect(this.buzzingGain);
+                    this.buzzingGain.connect(this.audioContext.destination);
+
+                    this.buzzingSource.start();
+                    this.buzzVolumeVariation();
+                }
             }
 
-            // Add realistic frequency variation to buzzing sound
-            buzzFrequencyVariation() {
-                if (!this.buzzingOscillator) return;
+            // Add volume variation for realistic near/far effect (忽远忽近)
+            buzzVolumeVariation() {
+                if (!this.buzzingGain) return;
 
                 const currentTime = this.audioContext.currentTime;
-                const duration = 0.3;
+                const duration = 1.5 + Math.random() * 2; // 1.5-3.5秒变化一次
 
-                // Random frequency variation between 200-300Hz
-                const targetFreq = 200 + Math.random() * 100;
-                this.buzzingOscillator.frequency.linearRampToValueAtTime(targetFreq, currentTime + duration);
-
-                // Random volume variation
-                const targetVolume = 0.1 + Math.random() * 0.15;
+                // Random volume between 0.05 (far) and 0.6 (near)
+                const targetVolume = 0.05 + Math.random() * 0.55;
                 this.buzzingGain.gain.linearRampToValueAtTime(targetVolume, currentTime + duration);
 
                 // Continue variation
-                setTimeout(() => this.buzzFrequencyVariation(), duration * 1000);
+                this.buzzVolumeTimeout = setTimeout(() => this.buzzVolumeVariation(), duration * 1000);
             }
 
             stopBuzzingSound() {
-                if (this.buzzingOscillator) {
+                if (this.buzzingSource) {
                     try {
-                        this.buzzingGain.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + 0.1);
-                        this.buzzingOscillator.stop(this.audioContext.currentTime + 0.2);
+                        if (this.buzzingGain) {
+                            this.buzzingGain.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + 0.1);
+                        }
+                        this.buzzingSource.stop(this.audioContext.currentTime + 0.2);
                     } catch (e) {
-                        // Oscillator already stopped
+                        // Source already stopped
                     }
-                    this.buzzingOscillator = null;
+                    this.buzzingSource = null;
                     this.buzzingGain = null;
+                }
+
+                // Clear volume variation timeout
+                if (this.buzzVolumeTimeout) {
+                    clearTimeout(this.buzzVolumeTimeout);
+                    this.buzzVolumeTimeout = null;
                 }
             }
 
@@ -474,7 +508,7 @@
                     return;
                 }
 
-                // Get hand positions in canvas coordinates
+                // Get hand positions in canvas coordinates (with mirror flip)
                 const handPositions = this.hands.map(hand => {
                     // 计算手掌中心（使用多个关键点的平均值）
                     const wrist = hand.landmarks[0];
@@ -485,14 +519,14 @@
                     const indexTip = hand.landmarks[8];
 
                     const palmCenter = {
-                        x: ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5) * this.canvas.width,
+                        x: (1 - ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5)) * this.canvas.width,  // 镜像翻转
                         y: ((wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5) * this.canvas.height
                     };
 
                     return {
                         palmCenter: palmCenter,
                         indexTip: {
-                            x: indexTip.x * this.canvas.width,
+                            x: (1 - indexTip.x) * this.canvas.width,  // 镜像翻转
                             y: indexTip.y * this.canvas.height
                         },
                         handedness: hand.handedness
@@ -521,7 +555,7 @@
                             y: (handPositions[0].palmCenter.y + handPositions[1].palmCenter.y) / 2
                         };
 
-                        this.checkMosquitoKill(clapCenter, 150);
+                        this.checkMosquitoKill(clapCenter, CONFIG.clapKillRadius);
                     }
                 }
 
@@ -618,45 +652,22 @@
                     this.ctx.restore();
                 }
 
-                // Draw mosquitos
+                // Draw mosquitos as large black dots
                 this.mosquitos.forEach(mosquito => {
                     if (!mosquito.alive) return;
 
                     this.ctx.save();
-                    this.ctx.translate(mosquito.x, mosquito.y);
-                    this.ctx.rotate(mosquito.angle);
-
-                    // Draw simple mosquito shape
-                    // Body
-                    this.ctx.fillStyle = '#333';
+                    this.ctx.fillStyle = '#000';
                     this.ctx.beginPath();
-                    this.ctx.ellipse(0, 0, mosquito.size * 0.3, mosquito.size * 0.15, 0, 0, Math.PI * 2);
+                    this.ctx.arc(mosquito.x, mosquito.y, mosquito.size / 2, 0, Math.PI * 2);
                     this.ctx.fill();
-
-                    // Wings
-                    this.ctx.fillStyle = 'rgba(200, 200, 255, 0.5)';
-                    this.ctx.beginPath();
-                    this.ctx.ellipse(-mosquito.size * 0.2, 0, mosquito.size * 0.4, mosquito.size * 0.2, Math.PI / 4, 0, Math.PI * 2);
-                    this.ctx.fill();
-                    this.ctx.beginPath();
-                    this.ctx.ellipse(mosquito.size * 0.2, 0, mosquito.size * 0.4, mosquito.size * 0.2, -Math.PI / 4, 0, Math.PI * 2);
-                    this.ctx.fill();
-
-                    // Proboscis
-                    this.ctx.strokeStyle = '#222';
-                    this.ctx.lineWidth = 2;
-                    this.ctx.beginPath();
-                    this.ctx.moveTo(mosquito.size * 0.3, 0);
-                    this.ctx.lineTo(mosquito.size * 0.5, 0);
-                    this.ctx.stroke();
-
                     this.ctx.restore();
                 });
 
-                // Draw hands
+                // Draw hands (with mirror flip)
                 this.hands.forEach(hand => {
                     hand.landmarks.forEach((landmark, idx) => {
-                        const x = landmark.x * this.canvas.width;
+                        const x = (1 - landmark.x) * this.canvas.width;  // 镜像翻转
                         const y = landmark.y * this.canvas.height;
 
                         this.ctx.fillStyle = idx === 8 ? '#00FF00' : '#FF0000';
@@ -691,7 +702,7 @@
                         const pinkyMcp = hand.landmarks[17];
 
                         return {
-                            x: ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5) * this.canvas.width,
+                            x: (1 - ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5)) * this.canvas.width,  // 镜像翻转
                             y: ((wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5) * this.canvas.height
                         };
                     });
