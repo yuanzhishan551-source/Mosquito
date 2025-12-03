@@ -172,7 +172,9 @@
                 this.backgroundImg = null;
                 this.insecticideImg = null;
                 this.insecticidePos = null;
+                this.insecticideOriginalPos = null; // 电蚊拍的原始固定位置
                 this.isHoldingInsecticide = false;
+                this.swatterHandPos = null; // 持有电蚊拍的手的位置
                 this.eyeOpenProgress = 0;
                 this.audioContext = null;
                 this.buzzingSource = null;
@@ -421,7 +423,7 @@
                 };
 
                 // Position insecticide at a visible location (right side)
-                this.insecticidePos = {
+                this.insecticideOriginalPos = {
                     x: offsetX + bgWidth * 0.8,
                     y: offsetY + bgHeight * 0.6,
                     width: CONFIG.insecticideWidth * scale,
@@ -429,6 +431,7 @@
                     rotation: CONFIG.insecticideRotation * Math.PI / 180,
                     scale: scale
                 };
+                this.insecticidePos = {...this.insecticideOriginalPos}; // 初始位置
             }
 
             createMosquitos() {
@@ -548,6 +551,8 @@
                 // Check if all mosquitos are dead
                 const allDead = this.mosquitos.every(m => !m.alive);
                 if (allDead && this.state === GAME_STATE.PLAYING) {
+                    // 所有蚊子都死了，停止嗡嗡声
+                    this.stopBuzzingSound();
                     this.state = GAME_STATE.EYE_CLOSING;
                     this.animateEyeClosing();
                 }
@@ -556,6 +561,12 @@
             checkHandInteractions() {
                 if (this.hands.length === 0) {
                     this.previousHandPositions = [];
+                    // 如果没有手，重置电蚊拍
+                    this.isHoldingInsecticide = false;
+                    this.swatterHandPos = null;
+                    if (this.insecticideOriginalPos) {
+                        this.insecticidePos = {...this.insecticideOriginalPos};
+                    }
                     return;
                 }
 
@@ -584,56 +595,107 @@
                     };
                 });
 
-                // Check for clapping (two hands moving towards each other quickly)
-                if (handPositions.length === 2 && this.previousHandPositions.length === 2) {
-                    const currentDist = this.distance(
-                        handPositions[0].palmCenter,
-                        handPositions[1].palmCenter
-                    );
+                // Check for clapping (新逻辑：双手张开 + 距离<5px + 之间有蚊子)
+                if (handPositions.length === 2) {
+                    const hand1 = this.hands[0];
+                    const hand2 = this.hands[1];
 
-                    const previousDist = this.distance(
-                        this.previousHandPositions[0].palmCenter,
-                        this.previousHandPositions[1].palmCenter
-                    );
+                    // 检查两只手是否都张开（不是握拳）
+                    const hand1Open = !this.isFist(hand1);
+                    const hand2Open = !this.isFist(hand2);
 
-                    // 计算手掌接近的速度
-                    const approachSpeed = previousDist - currentDist;
+                    if (hand1Open && hand2Open) {
+                        const currentDist = this.distance(
+                            handPositions[0].palmCenter,
+                            handPositions[1].palmCenter
+                        );
 
-                    // 检测拍击：手掌很近 && 快速接近
-                    if (currentDist < CONFIG.clapThreshold && approachSpeed > 10) {
-                        const clapCenter = {
-                            x: (handPositions[0].palmCenter.x + handPositions[1].palmCenter.x) / 2,
-                            y: (handPositions[0].palmCenter.y + handPositions[1].palmCenter.y) / 2
-                        };
+                        // 距离小于5px
+                        if (currentDist < 5) {
+                            // 检查是否有蚊子在两只手之间
+                            const palm1 = handPositions[0].palmCenter;
+                            const palm2 = handPositions[1].palmCenter;
 
-                        this.checkMosquitoKill(clapCenter, CONFIG.clapKillRadius);
+                            this.mosquitos.forEach(mosquito => {
+                                if (!mosquito.alive) return;
+
+                                // 检查蚊子是否在两只手之间
+                                // 使用简单的边界框检测
+                                const minX = Math.min(palm1.x, palm2.x);
+                                const maxX = Math.max(palm1.x, palm2.x);
+                                const minY = Math.min(palm1.y, palm2.y);
+                                const maxY = Math.max(palm1.y, palm2.y);
+
+                                // 扩大检测范围到50px
+                                const margin = 50;
+                                if (mosquito.x >= minX - margin && mosquito.x <= maxX + margin &&
+                                    mosquito.y >= minY - margin && mosquito.y <= maxY + margin) {
+                                    mosquito.alive = false;
+                                }
+                            });
+                        }
                     }
                 }
 
                 // Check for grabbing and using electric mosquito swatter
-                this.isHoldingInsecticide = false;
+                let stillHolding = false;
+
                 handPositions.forEach((handPos, idx) => {
                     const originalHand = this.hands[idx];
+                    const isFistNow = this.isFist(originalHand);
 
-                    // 检查手指尖是否靠近电蚊拍
-                    const distToSwatter = this.distance(handPos.indexTip, this.insecticidePos);
+                    // 如果已经持有电蚊拍
+                    if (this.isHoldingInsecticide) {
+                        // 只要还握拳就继续持有
+                        if (isFistNow) {
+                            stillHolding = true;
+                            this.swatterHandPos = handPos.indexTip;
 
-                    // 必须靠近电蚊拍 && 握拳才能拾取
-                    if (distToSwatter < CONFIG.sprayDistance && this.isFist(originalHand)) {
-                        this.isHoldingInsecticide = true;
+                            // 更新电蚊拍位置跟随手
+                            this.insecticidePos = {
+                                ...this.insecticideOriginalPos,
+                                x: handPos.indexTip.x,
+                                y: handPos.indexTip.y
+                            };
 
-                        // 检查蚊子是否被电蚊拍触碰到
-                        this.mosquitos.forEach(mosquito => {
-                            if (!mosquito.alive) return;
-                            const distToMosquito = this.distance(handPos.indexTip, mosquito);
-                            if (distToMosquito < 100) {
-                                mosquito.alive = false;
-                                this.stopBuzzingSound();
-                                this.playZapSound(); // 播放电击音效
-                            }
-                        });
+                            // 检查蚊子是否被电蚊拍触碰到
+                            this.mosquitos.forEach(mosquito => {
+                                if (!mosquito.alive) return;
+                                const distToMosquito = this.distance(handPos.indexTip, mosquito);
+                                if (distToMosquito < 100) {
+                                    mosquito.alive = false;
+                                    this.playZapSound(); // 播放电击音效
+                                }
+                            });
+                        }
+                    } else {
+                        // 如果还没有持有，检查是否靠近电蚊拍原始位置
+                        const distToSwatter = this.distance(handPos.indexTip, this.insecticideOriginalPos);
+
+                        // 必须靠近电蚊拍 && 握拳才能拾取
+                        if (distToSwatter < CONFIG.sprayDistance && isFistNow) {
+                            this.isHoldingInsecticide = true;
+                            stillHolding = true;
+                            this.swatterHandPos = handPos.indexTip;
+
+                            // 更新电蚊拍位置跟随手
+                            this.insecticidePos = {
+                                ...this.insecticideOriginalPos,
+                                x: handPos.indexTip.x,
+                                y: handPos.indexTip.y
+                            };
+                        }
                     }
                 });
+
+                // 如果没有继续持有，重置电蚊拍位置
+                if (!stillHolding) {
+                    this.isHoldingInsecticide = false;
+                    this.swatterHandPos = null;
+                    if (this.insecticideOriginalPos) {
+                        this.insecticidePos = {...this.insecticideOriginalPos};
+                    }
+                }
 
                 // 保存当前位置用于下一帧速度计算
                 this.previousHandPositions = handPositions;
@@ -645,8 +707,7 @@
                     const dist = this.distance(position, mosquito);
                     if (dist < radius) {
                         mosquito.alive = false;
-                        // 停止蚊子嗡嗡声
-                        this.stopBuzzingSound();
+                        // 不在这里停止嗡嗡声，只有所有蚊子死亡才停止
                     }
                 });
             }
