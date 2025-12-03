@@ -647,6 +647,7 @@
 
                 // Check for grabbing and using electric mosquito swatter
                 let stillHolding = false;
+                let mosquitoKilledByZap = false; // 标记是否有蚊子被电蚊拍杀死
 
                 handPositions.forEach((handPos, idx) => {
                     const originalHand = this.hands[idx];
@@ -659,20 +660,17 @@
                             stillHolding = true;
                             this.swatterHandPos = handPos.indexTip;
 
-                            // 更新电蚊拍位置跟随手
-                            this.insecticidePos = {
-                                ...this.insecticideOriginalPos,
-                                x: handPos.indexTip.x,
-                                y: handPos.indexTip.y
-                            };
+                            // 直接更新电蚊拍位置属性（不创建新对象）
+                            this.insecticidePos.x = handPos.indexTip.x;
+                            this.insecticidePos.y = handPos.indexTip.y;
 
                             // 检查蚊子是否被电蚊拍触碰到
                             this.mosquitos.forEach(mosquito => {
                                 if (!mosquito.alive) return;
                                 const distToMosquito = this.distance(handPos.indexTip, mosquito);
-                                if (distToMosquito < 100) {
+                                if (distToMosquito < CONFIG.zapKillRadius) {
                                     mosquito.alive = false;
-                                    this.playZapSound(); // 播放电击音效
+                                    mosquitoKilledByZap = true; // 标记有蚊子被杀死
                                 }
                             });
                         }
@@ -686,22 +684,25 @@
                             stillHolding = true;
                             this.swatterHandPos = handPos.indexTip;
 
-                            // 更新电蚊拍位置跟随手
-                            this.insecticidePos = {
-                                ...this.insecticideOriginalPos,
-                                x: handPos.indexTip.x,
-                                y: handPos.indexTip.y
-                            };
+                            // 直接更新电蚊拍位置属性（不创建新对象）
+                            this.insecticidePos.x = handPos.indexTip.x;
+                            this.insecticidePos.y = handPos.indexTip.y;
                         }
                     }
                 });
+
+                // 如果有蚊子被电蚊拍杀死，播放一次音效
+                if (mosquitoKilledByZap) {
+                    this.playZapSound();
+                }
 
                 // 如果没有继续持有，重置电蚊拍位置
                 if (!stillHolding) {
                     this.isHoldingInsecticide = false;
                     this.swatterHandPos = null;
                     if (this.insecticideOriginalPos) {
-                        this.insecticidePos = {...this.insecticideOriginalPos};
+                        this.insecticidePos.x = this.insecticideOriginalPos.x;
+                        this.insecticidePos.y = this.insecticideOriginalPos.y;
                     }
                 }
 
