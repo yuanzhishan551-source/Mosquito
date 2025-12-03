@@ -246,10 +246,11 @@
 
                 // Load buzzing sound from audio file
                 try {
-                    const response = await fetch('580629__vilatzara__mosquito1.wav');
+                    // Add cache-busting parameter to force reload
+                    const response = await fetch('580629__vilatzara__mosquito1.wav?v=' + Date.now());
                     const arrayBuffer = await response.arrayBuffer();
                     this.buzzingAudioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-                    console.log('Audio loaded successfully');
+                    console.log('Mosquito audio loaded successfully:', this.buzzingAudioBuffer.duration, 'seconds');
                 } catch (error) {
                     console.error('Failed to load audio file:', error);
                     // Fallback to synthesized sound if file not found
@@ -579,7 +580,7 @@
                     }
                 }
 
-                // Check for grabbing and using insecticide
+                // Check for grabbing insecticide (visual only, no killing)
                 this.isHoldingInsecticide = false;
                 handPositions.forEach(hand => {
                     // 检查手指尖是否靠近杀虫剂
@@ -587,16 +588,8 @@
 
                     if (distToInsecticide < CONFIG.sprayDistance) {
                         this.isHoldingInsecticide = true;
-
-                        // 检查蚊子是否在喷射范围内
-                        this.mosquitos.forEach(mosquito => {
-                            if (!mosquito.alive) return;
-                            const distToMosquito = this.distance(hand.indexTip, mosquito);
-                            if (distToMosquito < 200) {
-                                mosquito.alive = false;
-                                this.stopBuzzingSound();
-                            }
-                        });
+                        // 杀虫剂功能已禁用 - 只能用双手拍死蚊子
+                        // Insecticide disabled - can only kill by clapping
                     }
                 });
 
