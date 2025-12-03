@@ -136,7 +136,7 @@
             insecticideHeight: 477,
             insecticideRotation: 21.01,
             mosquitoCount: 1,  // 只有一只蚊子
-            mosquitoSize: 60,  // 蚊子大小（黑点）
+            mosquitoSize: 25,  // 蚊子大小（黑点）25x25
             mosquitoSpeed: 2,
             clapThreshold: 250, // Distance threshold for clap detection (增加了)
             clapSpeedThreshold: 300, // Speed threshold for clap (pixels/frame)
@@ -178,6 +178,7 @@
                 this.buzzingSource = null;
                 this.buzzingGain = null;
                 this.buzzingAudioBuffer = null;
+                this.zapAudioBuffer = null; // 电击音效
 
                 this.resizeCanvas();
                 window.addEventListener('resize', () => this.resizeCanvas());
@@ -236,8 +237,8 @@
 
                     this.insecticideImg = new Image();
                     this.insecticideImg.onload = checkComplete;
-                    this.insecticideImg.onerror = () => reject(new Error('Failed to load insecticide.png'));
-                    this.insecticideImg.src = 'insecticide.png';
+                    this.insecticideImg.onerror = () => reject(new Error('Failed to load electronic mosquito swatter.png'));
+                    this.insecticideImg.src = 'electronic mosquito swatter.png';
                 });
             }
 
@@ -252,9 +253,19 @@
                     this.buzzingAudioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
                     console.log('Mosquito audio loaded successfully:', this.buzzingAudioBuffer.duration, 'seconds');
                 } catch (error) {
-                    console.error('Failed to load audio file:', error);
-                    // Fallback to synthesized sound if file not found
+                    console.error('Failed to load mosquito audio file:', error);
                     this.buzzingAudioBuffer = null;
+                }
+
+                // Load electric zap sound
+                try {
+                    const response = await fetch('399549__soundslikewillem__electric-mosquito-killer-bat.wav?v=' + Date.now());
+                    const arrayBuffer = await response.arrayBuffer();
+                    this.zapAudioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                    console.log('Zap audio loaded successfully:', this.zapAudioBuffer.duration, 'seconds');
+                } catch (error) {
+                    console.error('Failed to load zap audio file:', error);
+                    this.zapAudioBuffer = null;
                 }
             }
 
@@ -334,6 +345,23 @@
                     clearTimeout(this.buzzVolumeTimeout);
                     this.buzzVolumeTimeout = null;
                 }
+            }
+
+            // Play electric zap sound (3x volume)
+            playZapSound() {
+                if (!this.audioContext || !this.zapAudioBuffer) return;
+
+                const source = this.audioContext.createBufferSource();
+                const gainNode = this.audioContext.createGain();
+
+                source.buffer = this.zapAudioBuffer;
+                // 3倍音量
+                gainNode.gain.setValueAtTime(3.0, this.audioContext.currentTime);
+
+                source.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+
+                source.start();
             }
 
             async setupHandTracking() {
@@ -432,16 +460,18 @@
                 this.eyeOpenProgress = 0;
                 this.createMosquitos();
 
-                // Start with black screen
+                // 黑屏2秒
                 setTimeout(() => {
+                    // 蚊子声音出现（持续2秒）
                     this.state = GAME_STATE.BUZZING;
                     this.playBuzzingSound();
 
+                    // 2秒后睁眼
                     setTimeout(() => {
                         this.state = GAME_STATE.EYE_OPENING;
                         this.animateEyeOpening();
-                    }, 1500);
-                }, 500);
+                    }, 2000);
+                }, 2000);
 
                 this.gameLoop();
             }
@@ -580,16 +610,28 @@
                     }
                 }
 
-                // Check for grabbing insecticide (visual only, no killing)
+                // Check for grabbing and using electric mosquito swatter
                 this.isHoldingInsecticide = false;
-                handPositions.forEach(hand => {
-                    // 检查手指尖是否靠近杀虫剂
-                    const distToInsecticide = this.distance(hand.indexTip, this.insecticidePos);
+                handPositions.forEach((handPos, idx) => {
+                    const originalHand = this.hands[idx];
 
-                    if (distToInsecticide < CONFIG.sprayDistance) {
+                    // 检查手指尖是否靠近电蚊拍
+                    const distToSwatter = this.distance(handPos.indexTip, this.insecticidePos);
+
+                    // 必须靠近电蚊拍 && 握拳才能拾取
+                    if (distToSwatter < CONFIG.sprayDistance && this.isFist(originalHand)) {
                         this.isHoldingInsecticide = true;
-                        // 杀虫剂功能已禁用 - 只能用双手拍死蚊子
-                        // Insecticide disabled - can only kill by clapping
+
+                        // 检查蚊子是否被电蚊拍触碰到
+                        this.mosquitos.forEach(mosquito => {
+                            if (!mosquito.alive) return;
+                            const distToMosquito = this.distance(handPos.indexTip, mosquito);
+                            if (distToMosquito < 100) {
+                                mosquito.alive = false;
+                                this.stopBuzzingSound();
+                                this.playZapSound(); // 播放电击音效
+                            }
+                        });
                     }
                 });
 
@@ -613,6 +655,33 @@
                 const dx = p1.x - p2.x;
                 const dy = p1.y - p2.y;
                 return Math.sqrt(dx * dx + dy * dy);
+            }
+
+            // 检测手是否握拳
+            isFist(hand) {
+                // 检查所有手指尖是否靠近手腕
+                const wrist = hand.landmarks[0];
+                const fingerTips = [
+                    hand.landmarks[4],  // 拇指尖
+                    hand.landmarks[8],  // 食指尖
+                    hand.landmarks[12], // 中指尖
+                    hand.landmarks[16], // 无名指尖
+                    hand.landmarks[20]  // 小指尖
+                ];
+
+                // 计算手指尖到手腕的平均距离
+                let totalDistance = 0;
+                fingerTips.forEach(tip => {
+                    const dx = tip.x - wrist.x;
+                    const dy = tip.y - wrist.y;
+                    const dz = tip.z - wrist.z;
+                    totalDistance += Math.sqrt(dx * dx + dy * dy + dz * dz);
+                });
+                const avgDistance = totalDistance / fingerTips.length;
+
+                // 如果平均距离小于阈值，认为是握拳
+                // 通常握拳时距离约 0.08-0.12，张开手约 0.15-0.25
+                return avgDistance < 0.13;
             }
 
             render() {
