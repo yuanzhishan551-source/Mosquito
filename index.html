@@ -135,11 +135,12 @@
             insecticideWidth: 297,
             insecticideHeight: 477,
             insecticideRotation: 21.01,
-            mosquitoCount: 8,
+            mosquitoCount: 1,  // 只有一只蚊子
             mosquitoSize: 40,
             mosquitoSpeed: 2,
-            clapThreshold: 100, // Distance threshold for clap detection
-            sprayDistance: 150, // Distance to grab insecticide
+            clapThreshold: 150, // Distance threshold for clap detection
+            clapSpeedThreshold: 300, // Speed threshold for clap (pixels/frame)
+            sprayDistance: 200, // Distance to grab insecticide
             gameRestartDelay: 2000
         };
 
@@ -166,13 +167,15 @@
                 this.state = GAME_STATE.LOADING;
                 this.mosquitos = [];
                 this.hands = [];
+                this.previousHandPositions = []; // 追踪之前的手位置用于检测拍击
                 this.backgroundImg = null;
                 this.insecticideImg = null;
                 this.insecticidePos = null;
                 this.isHoldingInsecticide = false;
                 this.eyeOpenProgress = 0;
                 this.audioContext = null;
-                this.buzzingSound = null;
+                this.buzzingOscillator = null;
+                this.buzzingGain = null;
 
                 this.resizeCanvas();
                 window.addEventListener('resize', () => this.resizeCanvas());
@@ -240,28 +243,62 @@
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
 
-            // Create buzzing sound using Web Audio API
+            // Create buzzing sound using Web Audio API - loops until stopped
             playBuzzingSound() {
                 if (!this.audioContext) return;
 
+                // Stop existing sound if any
+                this.stopBuzzingSound();
+
                 // Create oscillator for buzzing sound
-                const oscillator = this.audioContext.createOscillator();
-                const gainNode = this.audioContext.createGain();
+                this.buzzingOscillator = this.audioContext.createOscillator();
+                this.buzzingGain = this.audioContext.createGain();
 
-                oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
-                oscillator.frequency.linearRampToValueAtTime(250, this.audioContext.currentTime + 0.5);
+                this.buzzingOscillator.type = 'sawtooth';
+                this.buzzingOscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
 
-                gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-                gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + 0.5);
-                gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + 2.5);
-                gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + 3);
+                // Create a pulsing effect
+                this.buzzingGain.gain.setValueAtTime(0.1, this.audioContext.currentTime);
 
-                oscillator.connect(gainNode);
-                gainNode.connect(this.audioContext.destination);
+                this.buzzingOscillator.connect(this.buzzingGain);
+                this.buzzingGain.connect(this.audioContext.destination);
 
-                oscillator.start();
-                oscillator.stop(this.audioContext.currentTime + 3);
+                this.buzzingOscillator.start();
+
+                // Add frequency variation for realistic buzzing
+                this.buzzFrequencyVariation();
+            }
+
+            // Add realistic frequency variation to buzzing sound
+            buzzFrequencyVariation() {
+                if (!this.buzzingOscillator) return;
+
+                const currentTime = this.audioContext.currentTime;
+                const duration = 0.3;
+
+                // Random frequency variation between 200-300Hz
+                const targetFreq = 200 + Math.random() * 100;
+                this.buzzingOscillator.frequency.linearRampToValueAtTime(targetFreq, currentTime + duration);
+
+                // Random volume variation
+                const targetVolume = 0.1 + Math.random() * 0.15;
+                this.buzzingGain.gain.linearRampToValueAtTime(targetVolume, currentTime + duration);
+
+                // Continue variation
+                setTimeout(() => this.buzzFrequencyVariation(), duration * 1000);
+            }
+
+            stopBuzzingSound() {
+                if (this.buzzingOscillator) {
+                    try {
+                        this.buzzingGain.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + 0.1);
+                        this.buzzingOscillator.stop(this.audioContext.currentTime + 0.2);
+                    } catch (e) {
+                        // Oscillator already stopped
+                    }
+                    this.buzzingOscillator = null;
+                    this.buzzingGain = null;
+                }
             }
 
             async setupHandTracking() {
@@ -432,17 +469,28 @@
             }
 
             checkHandInteractions() {
-                if (this.hands.length === 0) return;
+                if (this.hands.length === 0) {
+                    this.previousHandPositions = [];
+                    return;
+                }
 
                 // Get hand positions in canvas coordinates
                 const handPositions = this.hands.map(hand => {
+                    // 计算手掌中心（使用多个关键点的平均值）
                     const wrist = hand.landmarks[0];
+                    const indexMcp = hand.landmarks[5];  // 食指掌指关节
+                    const middleMcp = hand.landmarks[9]; // 中指掌指关节
+                    const ringMcp = hand.landmarks[13];  // 无名指掌指关节
+                    const pinkyMcp = hand.landmarks[17]; // 小指掌指关节
                     const indexTip = hand.landmarks[8];
+
+                    const palmCenter = {
+                        x: ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5) * this.canvas.width,
+                        y: ((wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5) * this.canvas.height
+                    };
+
                     return {
-                        wrist: {
-                            x: wrist.x * this.canvas.width,
-                            y: wrist.y * this.canvas.height
-                        },
+                        palmCenter: palmCenter,
                         indexTip: {
                             x: indexTip.x * this.canvas.width,
                             y: indexTip.y * this.canvas.height
@@ -451,41 +499,55 @@
                     };
                 });
 
-                // Check for clapping (two hands close together)
-                if (handPositions.length === 2) {
-                    const dist = this.distance(
-                        handPositions[0].indexTip,
-                        handPositions[1].indexTip
+                // Check for clapping (two hands moving towards each other quickly)
+                if (handPositions.length === 2 && this.previousHandPositions.length === 2) {
+                    const currentDist = this.distance(
+                        handPositions[0].palmCenter,
+                        handPositions[1].palmCenter
                     );
 
-                    if (dist < CONFIG.clapThreshold) {
+                    const previousDist = this.distance(
+                        this.previousHandPositions[0].palmCenter,
+                        this.previousHandPositions[1].palmCenter
+                    );
+
+                    // 计算手掌接近的速度
+                    const approachSpeed = previousDist - currentDist;
+
+                    // 检测拍击：手掌很近 && 快速接近
+                    if (currentDist < CONFIG.clapThreshold && approachSpeed > 10) {
                         const clapCenter = {
-                            x: (handPositions[0].indexTip.x + handPositions[1].indexTip.x) / 2,
-                            y: (handPositions[0].indexTip.y + handPositions[1].indexTip.y) / 2
+                            x: (handPositions[0].palmCenter.x + handPositions[1].palmCenter.x) / 2,
+                            y: (handPositions[0].palmCenter.y + handPositions[1].palmCenter.y) / 2
                         };
 
-                        this.checkMosquitoKill(clapCenter, 100);
+                        this.checkMosquitoKill(clapCenter, 150);
                     }
                 }
 
-                // Check for grabbing insecticide
+                // Check for grabbing and using insecticide
+                this.isHoldingInsecticide = false;
                 handPositions.forEach(hand => {
+                    // 检查手指尖是否靠近杀虫剂
                     const distToInsecticide = this.distance(hand.indexTip, this.insecticidePos);
 
                     if (distToInsecticide < CONFIG.sprayDistance) {
                         this.isHoldingInsecticide = true;
-                        // Check mosquitos in a cone in front of spray
+
+                        // 检查蚊子是否在喷射范围内
                         this.mosquitos.forEach(mosquito => {
                             if (!mosquito.alive) return;
                             const distToMosquito = this.distance(hand.indexTip, mosquito);
                             if (distToMosquito < 200) {
                                 mosquito.alive = false;
+                                this.stopBuzzingSound();
                             }
                         });
-                    } else {
-                        this.isHoldingInsecticide = false;
                     }
                 });
+
+                // 保存当前位置用于下一帧速度计算
+                this.previousHandPositions = handPositions;
             }
 
             checkMosquitoKill(position, radius) {
@@ -494,6 +556,8 @@
                     const dist = this.distance(position, mosquito);
                     if (dist < radius) {
                         mosquito.alive = false;
+                        // 停止蚊子嗡嗡声
+                        this.stopBuzzingSound();
                     }
                 });
             }
@@ -610,12 +674,40 @@
 
             updateDebugInfo() {
                 const aliveMosquitos = this.mosquitos.filter(m => m.alive).length;
-                this.debugInfo.innerHTML = `
+                let debugText = `
                     状态: ${this.state}<br>
                     蚊子数量: ${aliveMosquitos}/${this.mosquitos.length}<br>
                     检测到的手: ${this.hands.length}<br>
-                    持有杀虫剂: ${this.isHoldingInsecticide ? '是' : '否'}
+                    持有杀虫剂: ${this.isHoldingInsecticide ? '是' : '否'}<br>
                 `;
+
+                // 显示手掌距离（用于调试拍手检测）
+                if (this.hands.length === 2 && this.previousHandPositions.length === 2) {
+                    const handPositions = this.hands.map(hand => {
+                        const wrist = hand.landmarks[0];
+                        const indexMcp = hand.landmarks[5];
+                        const middleMcp = hand.landmarks[9];
+                        const ringMcp = hand.landmarks[13];
+                        const pinkyMcp = hand.landmarks[17];
+
+                        return {
+                            x: ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5) * this.canvas.width,
+                            y: ((wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5) * this.canvas.height
+                        };
+                    });
+
+                    const currentDist = this.distance(handPositions[0], handPositions[1]);
+
+                    const prevPos = this.previousHandPositions.map(h => h.palmCenter);
+                    const previousDist = this.distance(prevPos[0], prevPos[1]);
+                    const approachSpeed = previousDist - currentDist;
+
+                    debugText += `手掌距离: ${Math.round(currentDist)}px<br>`;
+                    debugText += `接近速度: ${Math.round(approachSpeed)}px/帧<br>`;
+                    debugText += `拍手阈值: ${CONFIG.clapThreshold}px`;
+                }
+
+                this.debugInfo.innerHTML = debugText;
             }
         }
 
