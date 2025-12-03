@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>蚊子游戏 - Mosquito Interactive Scene</title>
+    <title>Mosquito Interactive Game</title>
     <style>
         * {
             margin: 0;
@@ -116,9 +116,9 @@
         <div id="debugInfo"></div>
         <div id="loadingScreen">
             <div class="spinner"></div>
-            <div>加载中... Loading resources...</div>
+            <div>Loading resources...</div>
         </div>
-        <button id="startButton">点击开始 / Click to Start</button>
+        <button id="startButton">Click to Start</button>
     </div>
 
     <!-- MediaPipe Hands library -->
@@ -138,10 +138,10 @@
             mosquitoCount: 5,
             mosquitoSize: 2.5,
             mosquitoSpeed: 2,
-            clapDistance: 150,  // 拍手检测距离
-            clapKillRadius: 150,  // 拍击杀死半径
-            swatterGrabDistance: 300,  // 拾取电蚊拍距离
-            zapKillRadius: 100,  // 电蚊拍杀死半径
+            clapDistance: 150,  // Clap detection distance
+            clapKillRadius: 150,  // Clap kill radius
+            swatterGrabDistance: 300,  // Swatter grab distance
+            zapKillRadius: 100,  // Electric swatter kill radius
             gameRestartDelay: 2000
         };
 
@@ -168,20 +168,20 @@
                 this.state = GAME_STATE.LOADING;
                 this.mosquitos = [];
                 this.hands = [];
-                this.previousHandPositions = []; // 追踪之前的手位置用于检测拍击
+                this.previousHandPositions = [];
                 this.backgroundImg = null;
                 this.insecticideImg = null;
                 this.insecticidePos = null;
-                this.insecticideOriginalPos = null; // 电蚊拍的原始固定位置
+                this.insecticideOriginalPos = null;
                 this.isHoldingInsecticide = false;
-                this.swatterHandPos = null; // 持有电蚊拍的手的位置
+                this.swatterHandPos = null;
                 this.eyeOpenProgress = 0;
                 this.audioContext = null;
                 this.buzzingSource = null;
                 this.buzzingGain = null;
                 this.buzzingAudioBuffer = null;
-                this.zapAudioBuffer = null; // 电击音效
-                this.zapSource = null; // 当前播放的电击音效source
+                this.zapAudioBuffer = null;
+                this.zapSource = null;
 
                 this.resizeCanvas();
                 window.addEventListener('resize', () => this.resizeCanvas());
@@ -219,7 +219,7 @@
 
                 } catch (error) {
                     console.error('Initialization error:', error);
-                    this.loadingScreen.innerHTML = `<div style="color: red;">加载失败: ${error.message}</div>`;
+                    this.loadingScreen.innerHTML = `<div style="color: red;">Loading failed: ${error.message}</div>`;
                 }
             }
 
@@ -314,12 +314,12 @@
                 }
             }
 
-            // Add volume variation for realistic near/far effect (忽远忽近)
+            // Add volume variation for realistic near/far effect
             buzzVolumeVariation() {
                 if (!this.buzzingGain) return;
 
                 const currentTime = this.audioContext.currentTime;
-                const duration = 1.5 + Math.random() * 2; // 1.5-3.5秒变化一次
+                const duration = 1.5 + Math.random() * 2; // Change every 1.5-3.5 seconds
 
                 // Random volume between 0.05 (far) and 0.6 (near)
                 const targetVolume = 0.05 + Math.random() * 0.55;
@@ -354,7 +354,7 @@
             playZapSound() {
                 if (!this.audioContext || !this.zapAudioBuffer) return;
 
-                // 停止之前的音效，避免叠加
+                // Stop previous sound to avoid overlapping
                 if (this.zapSource) {
                     try {
                         this.zapSource.stop();
@@ -368,16 +368,16 @@
                 const gainNode = this.audioContext.createGain();
 
                 source.buffer = this.zapAudioBuffer;
-                // 6倍音量（更大声）
+                // 6x volume (louder)
                 gainNode.gain.setValueAtTime(6.0, this.audioContext.currentTime);
 
                 source.connect(gainNode);
                 gainNode.connect(this.audioContext.destination);
 
-                // 保存source引用
+                // Save source reference
                 this.zapSource = source;
 
-                // 音效播放完后清除引用
+                // Clear reference when sound ends
                 source.onended = () => {
                     this.zapSource = null;
                 };
@@ -482,13 +482,13 @@
                 this.eyeOpenProgress = 0;
                 this.createMosquitos();
 
-                // 黑屏2秒
+                // Black screen for 2 seconds
                 setTimeout(() => {
-                    // 蚊子声音出现（持续2秒）
+                    // Buzzing sound starts (lasts 2 seconds)
                     this.state = GAME_STATE.BUZZING;
                     this.playBuzzingSound();
 
-                    // 2秒后睁眼
+                    // Eye opening after 2 seconds
                     setTimeout(() => {
                         this.state = GAME_STATE.EYE_OPENING;
                         this.animateEyeOpening();
@@ -570,7 +570,7 @@
                 // Check if all mosquitos are dead
                 const allDead = this.mosquitos.every(m => !m.alive);
                 if (allDead && this.state === GAME_STATE.PLAYING) {
-                    // 所有蚊子都死了，停止嗡嗡声
+                    // All mosquitos are dead, stop buzzing sound
                     this.stopBuzzingSound();
                     this.state = GAME_STATE.EYE_CLOSING;
                     this.animateEyeClosing();
@@ -580,7 +580,7 @@
             checkHandInteractions() {
                 if (this.hands.length === 0) {
                     this.previousHandPositions = [];
-                    // 如果没有手，重置电蚊拍
+                    // Reset swatter if no hands detected
                     this.isHoldingInsecticide = false;
                     this.swatterHandPos = null;
                     if (this.insecticideOriginalPos) {
@@ -591,30 +591,30 @@
 
                 // Get hand positions in canvas coordinates (with mirror flip)
                 const handPositions = this.hands.map(hand => {
-                    // 计算手掌中心（使用多个关键点的平均值）
+                    // Calculate palm center using multiple keypoints
                     const wrist = hand.landmarks[0];
-                    const indexMcp = hand.landmarks[5];  // 食指掌指关节
-                    const middleMcp = hand.landmarks[9]; // 中指掌指关节
-                    const ringMcp = hand.landmarks[13];  // 无名指掌指关节
-                    const pinkyMcp = hand.landmarks[17]; // 小指掌指关节
+                    const indexMcp = hand.landmarks[5];
+                    const middleMcp = hand.landmarks[9];
+                    const ringMcp = hand.landmarks[13];
+                    const pinkyMcp = hand.landmarks[17];
                     const indexTip = hand.landmarks[8];
 
                     const palmCenter = {
-                        x: (1 - ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5)) * this.canvas.width,  // 镜像翻转
+                        x: (1 - ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5)) * this.canvas.width,
                         y: ((wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5) * this.canvas.height
                     };
 
                     return {
                         palmCenter: palmCenter,
                         indexTip: {
-                            x: (1 - indexTip.x) * this.canvas.width,  // 镜像翻转
+                            x: (1 - indexTip.x) * this.canvas.width,
                             y: indexTip.y * this.canvas.height
                         },
                         handedness: hand.handedness
                     };
                 });
 
-                // Check for clapping (双手靠近即可拍击)
+                // Check for clapping
                 if (handPositions.length === 2) {
                     const currentDist = this.distance(
                         handPositions[0].palmCenter,
@@ -640,35 +640,35 @@
 
                 // Check for grabbing and using electric mosquito swatter
                 let stillHolding = false;
-                let mosquitoKilledByZap = false; // 标记是否有蚊子被电蚊拍杀死
+                let mosquitoKilledByZap = false;
 
                 handPositions.forEach((handPos, idx) => {
                     const originalHand = this.hands[idx];
                     const isFistNow = this.isFist(originalHand);
 
-                    // 如果已经持有电蚊拍
+                    // If already holding swatter
                     if (this.isHoldingInsecticide) {
-                        // 只要还握拳就继续持有
+                        // Keep holding as long as fist is closed
                         if (isFistNow) {
                             stillHolding = true;
                             this.swatterHandPos = handPos.indexTip;
 
-                            // 直接更新电蚊拍位置属性（不创建新对象）
+                            // Update swatter position
                             this.insecticidePos.x = handPos.indexTip.x;
                             this.insecticidePos.y = handPos.indexTip.y;
 
-                            // 检查蚊子是否被电蚊拍触碰到
+                            // Check if mosquito is hit by swatter
                             this.mosquitos.forEach(mosquito => {
                                 if (!mosquito.alive) return;
                                 const distToMosquito = this.distance(handPos.indexTip, mosquito);
                                 if (distToMosquito < CONFIG.zapKillRadius) {
                                     mosquito.alive = false;
-                                    mosquitoKilledByZap = true; // 标记有蚊子被杀死
+                                    mosquitoKilledByZap = true;
                                 }
                             });
                         }
                     } else {
-                        // 如果还没有持有，检查是否靠近电蚊拍原始位置
+                        // If not holding yet, check if near swatter
                         const distToSwatter = this.distance(handPos.indexTip, this.insecticideOriginalPos);
 
                         if (distToSwatter < CONFIG.swatterGrabDistance && isFistNow) {
@@ -681,12 +681,12 @@
                     }
                 });
 
-                // 如果有蚊子被电蚊拍杀死，播放一次音效
+                // Play zap sound if mosquito was killed
                 if (mosquitoKilledByZap) {
                     this.playZapSound();
                 }
 
-                // 如果没有继续持有，重置电蚊拍位置
+                // Reset swatter position if not holding
                 if (!stillHolding) {
                     this.isHoldingInsecticide = false;
                     this.swatterHandPos = null;
@@ -696,7 +696,7 @@
                     }
                 }
 
-                // 保存当前位置用于下一帧速度计算
+                // Save current positions for next frame
                 this.previousHandPositions = handPositions;
             }
 
@@ -706,7 +706,7 @@
                     const dist = this.distance(position, mosquito);
                     if (dist < radius) {
                         mosquito.alive = false;
-                        // 不在这里停止嗡嗡声，只有所有蚊子死亡才停止
+                        // Don't stop buzzing here, only when all mosquitos are dead
                     }
                 });
             }
@@ -717,19 +717,19 @@
                 return Math.sqrt(dx * dx + dy * dy);
             }
 
-            // 检测手是否握拳
+            // Detect if hand is making a fist
             isFist(hand) {
-                // 检查所有手指尖是否靠近手腕
+                // Check if all fingertips are close to wrist
                 const wrist = hand.landmarks[0];
                 const fingerTips = [
-                    hand.landmarks[4],  // 拇指尖
-                    hand.landmarks[8],  // 食指尖
-                    hand.landmarks[12], // 中指尖
-                    hand.landmarks[16], // 无名指尖
-                    hand.landmarks[20]  // 小指尖
+                    hand.landmarks[4],  // Thumb tip
+                    hand.landmarks[8],  // Index tip
+                    hand.landmarks[12], // Middle tip
+                    hand.landmarks[16], // Ring tip
+                    hand.landmarks[20]  // Pinky tip
                 ];
 
-                // 计算手指尖到手腕的平均距离
+                // Calculate average distance from fingertips to wrist
                 let totalDistance = 0;
                 fingerTips.forEach(tip => {
                     const dx = tip.x - wrist.x;
@@ -739,9 +739,9 @@
                 });
                 const avgDistance = totalDistance / fingerTips.length;
 
-                // 进一步放宽阈值：握拳时距离约 0.08-0.15，张开手约 0.18-0.3
-                // 从0.16增加到0.20，更容易检测握拳
-                this.lastFistDistance = avgDistance; // 保存用于调试
+                // Threshold: fist ~0.08-0.15, open hand ~0.18-0.3
+                // Using 0.20 for easier fist detection
+                this.lastFistDistance = avgDistance;
                 return avgDistance < 0.20;
             }
 
@@ -750,7 +750,7 @@
                 this.ctx.fillStyle = '#000';
                 this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-                // 在 LOADING、BLACK_SCREEN、BUZZING 状态时只显示黑屏
+                // Only show black screen during LOADING, BLACK_SCREEN, BUZZING states
                 if (this.state === GAME_STATE.LOADING ||
                     this.state === GAME_STATE.BLACK_SCREEN ||
                     this.state === GAME_STATE.BUZZING) {
@@ -832,26 +832,26 @@
             updateDebugInfo() {
                 const aliveMosquitos = this.mosquitos.filter(m => m.alive).length;
                 let debugText = `
-                    状态: ${this.state}<br>
-                    蚊子数量: ${aliveMosquitos}/${this.mosquitos.length}<br>
-                    检测到的手: ${this.hands.length}<br>
-                    持有电蚊拍: ${this.isHoldingInsecticide ? '是' : '否'}<br>
+                    State: ${this.state}<br>
+                    Mosquitos: ${aliveMosquitos}/${this.mosquitos.length}<br>
+                    Hands detected: ${this.hands.length}<br>
+                    Holding swatter: ${this.isHoldingInsecticide ? 'Yes' : 'No'}<br>
                 `;
 
-                // 显示电蚊拍位置信息
+                // Show swatter position info
                 if (this.insecticidePos && this.insecticideOriginalPos) {
                     const moved = Math.abs(this.insecticidePos.x - this.insecticideOriginalPos.x) > 1 ||
                                   Math.abs(this.insecticidePos.y - this.insecticideOriginalPos.y) > 1;
-                    debugText += `电蚊拍移动: ${moved ? '是' : '否'} (${Math.round(this.insecticidePos.x)},${Math.round(this.insecticidePos.y)})<br>`;
+                    debugText += `Swatter moved: ${moved ? 'Yes' : 'No'} (${Math.round(this.insecticidePos.x)},${Math.round(this.insecticidePos.y)})<br>`;
                 }
 
-                // 显示握拳检测状态
+                // Show fist detection status
                 if (this.hands.length > 0 && this.lastFistDistance !== undefined) {
                     const isFist = this.lastFistDistance < 0.20;
-                    debugText += `握拳检测: ${isFist ? '握拳' : '张开'} (${this.lastFistDistance.toFixed(3)} < 0.20)<br>`;
+                    debugText += `Fist detection: ${isFist ? 'Fist' : 'Open'} (${this.lastFistDistance.toFixed(3)} < 0.20)<br>`;
                 }
 
-                // 显示手到电蚊拍的距离
+                // Show hand to swatter distance
                 if (this.hands.length > 0 && this.insecticideOriginalPos) {
                     const handPos = this.hands[0].landmarks[8];
                     const handX = (1 - handPos.x) * this.canvas.width;
@@ -860,10 +860,10 @@
                         Math.pow(handX - this.insecticideOriginalPos.x, 2) +
                         Math.pow(handY - this.insecticideOriginalPos.y, 2)
                     );
-                    debugText += `手到电蚊拍距离: ${Math.round(distToSwatter)}px (< ${CONFIG.swatterGrabDistance})<br>`;
+                    debugText += `Hand to swatter: ${Math.round(distToSwatter)}px (< ${CONFIG.swatterGrabDistance})<br>`;
                 }
 
-                // 显示手掌距离（用于调试拍手检测）
+                // Show hand distance for clap detection
                 if (this.hands.length === 2 && this.previousHandPositions.length === 2) {
                     const handPositions = this.hands.map(hand => {
                         const wrist = hand.landmarks[0];
@@ -873,13 +873,13 @@
                         const pinkyMcp = hand.landmarks[17];
 
                         return {
-                            x: (1 - ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5)) * this.canvas.width,  // 镜像翻转
+                            x: (1 - ((wrist.x + indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 5)) * this.canvas.width,
                             y: ((wrist.y + indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 5) * this.canvas.height
                         };
                     });
 
                     const currentDist = this.distance(handPositions[0], handPositions[1]);
-                    debugText += `手掌距离: ${Math.round(currentDist)}px`;
+                    debugText += `Hands distance: ${Math.round(currentDist)}px`;
                 }
 
                 this.debugInfo.innerHTML = debugText;
