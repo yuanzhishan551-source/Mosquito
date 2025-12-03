@@ -135,15 +135,14 @@
             insecticideWidth: 297,
             insecticideHeight: 477,
             insecticideRotation: 21.01,
-            mosquitoCount: 5,  // 5只蚊子
-            mosquitoSize: 2.5,  // 蚊子大小（黑点）2.5px
+            mosquitoCount: 5,
+            mosquitoSize: 2.5,
             mosquitoSpeed: 2,
-            clapThreshold: 250, // Distance threshold for clap detection (增加了)
-            clapSpeedThreshold: 300, // Speed threshold for clap (pixels/frame)
-            sprayDistance: 300, // Distance to grab insecticide (增加到300)
-            gameRestartDelay: 2000,
-            clapKillRadius: 250,  // 拍击杀死半径（增加了）
-            zapKillRadius: 100  // 电蚊拍杀死半径
+            clapDistance: 150,  // 拍手检测距离
+            clapKillRadius: 150,  // 拍击杀死半径
+            swatterGrabDistance: 300,  // 拾取电蚊拍距离
+            zapKillRadius: 100,  // 电蚊拍杀死半径
+            gameRestartDelay: 2000
         };
 
         // Game state
@@ -183,8 +182,6 @@
                 this.buzzingAudioBuffer = null;
                 this.zapAudioBuffer = null; // 电击音效
                 this.zapSource = null; // 当前播放的电击音效source
-                this.lastZapTime = 0; // 上次播放电击音效的时间
-                this.zapCooldown = 200; // 电击音效冷却时间（毫秒）
 
                 this.resizeCanvas();
                 window.addEventListener('resize', () => this.resizeCanvas());
@@ -617,45 +614,27 @@
                     };
                 });
 
-                // Check for clapping (新逻辑：双手张开 + 距离<5px + 之间有蚊子)
+                // Check for clapping (双手靠近即可拍击)
                 if (handPositions.length === 2) {
-                    const hand1 = this.hands[0];
-                    const hand2 = this.hands[1];
+                    const currentDist = this.distance(
+                        handPositions[0].palmCenter,
+                        handPositions[1].palmCenter
+                    );
 
-                    // 检查两只手是否都张开（不是握拳）
-                    const hand1Open = !this.isFist(hand1);
-                    const hand2Open = !this.isFist(hand2);
+                    if (currentDist < CONFIG.clapDistance) {
+                        const centerX = (handPositions[0].palmCenter.x + handPositions[1].palmCenter.x) / 2;
+                        const centerY = (handPositions[0].palmCenter.y + handPositions[1].palmCenter.y) / 2;
 
-                    if (hand1Open && hand2Open) {
-                        const currentDist = this.distance(
-                            handPositions[0].palmCenter,
-                            handPositions[1].palmCenter
-                        );
-
-                        // 距离小于5px
-                        if (currentDist < 5) {
-                            // 检查是否有蚊子在两只手之间
-                            const palm1 = handPositions[0].palmCenter;
-                            const palm2 = handPositions[1].palmCenter;
-
-                            this.mosquitos.forEach(mosquito => {
-                                if (!mosquito.alive) return;
-
-                                // 检查蚊子是否在两只手之间
-                                // 使用简单的边界框检测
-                                const minX = Math.min(palm1.x, palm2.x);
-                                const maxX = Math.max(palm1.x, palm2.x);
-                                const minY = Math.min(palm1.y, palm2.y);
-                                const maxY = Math.max(palm1.y, palm2.y);
-
-                                // 扩大检测范围到50px
-                                const margin = 50;
-                                if (mosquito.x >= minX - margin && mosquito.x <= maxX + margin &&
-                                    mosquito.y >= minY - margin && mosquito.y <= maxY + margin) {
-                                    mosquito.alive = false;
-                                }
-                            });
-                        }
+                        this.mosquitos.forEach(mosquito => {
+                            if (!mosquito.alive) return;
+                            const distToCenter = Math.sqrt(
+                                Math.pow(mosquito.x - centerX, 2) +
+                                Math.pow(mosquito.y - centerY, 2)
+                            );
+                            if (distToCenter < CONFIG.clapKillRadius) {
+                                mosquito.alive = false;
+                            }
+                        });
                     }
                 }
 
@@ -692,13 +671,10 @@
                         // 如果还没有持有，检查是否靠近电蚊拍原始位置
                         const distToSwatter = this.distance(handPos.indexTip, this.insecticideOriginalPos);
 
-                        // 必须靠近电蚊拍 && 握拳才能拾取
-                        if (distToSwatter < CONFIG.sprayDistance && isFistNow) {
+                        if (distToSwatter < CONFIG.swatterGrabDistance && isFistNow) {
                             this.isHoldingInsecticide = true;
                             stillHolding = true;
                             this.swatterHandPos = handPos.indexTip;
-
-                            // 直接更新电蚊拍位置属性（不创建新对象）
                             this.insecticidePos.x = handPos.indexTip.x;
                             this.insecticidePos.y = handPos.indexTip.y;
                         }
@@ -877,14 +853,14 @@
 
                 // 显示手到电蚊拍的距离
                 if (this.hands.length > 0 && this.insecticideOriginalPos) {
-                    const handPos = this.hands[0].landmarks[8]; // 食指尖
+                    const handPos = this.hands[0].landmarks[8];
                     const handX = (1 - handPos.x) * this.canvas.width;
                     const handY = handPos.y * this.canvas.height;
                     const distToSwatter = Math.sqrt(
                         Math.pow(handX - this.insecticideOriginalPos.x, 2) +
                         Math.pow(handY - this.insecticideOriginalPos.y, 2)
                     );
-                    debugText += `手到电蚊拍距离: ${Math.round(distToSwatter)}px (< ${CONFIG.sprayDistance}可拾取)<br>`;
+                    debugText += `手到电蚊拍距离: ${Math.round(distToSwatter)}px (< ${CONFIG.swatterGrabDistance})<br>`;
                 }
 
                 // 显示手掌距离（用于调试拍手检测）
