@@ -140,9 +140,10 @@
             mosquitoSpeed: 2,
             clapThreshold: 250, // Distance threshold for clap detection (增加了)
             clapSpeedThreshold: 300, // Speed threshold for clap (pixels/frame)
-            sprayDistance: 200, // Distance to grab insecticide
+            sprayDistance: 300, // Distance to grab insecticide (增加到300)
             gameRestartDelay: 2000,
-            clapKillRadius: 250  // 拍击杀死半径（增加了）
+            clapKillRadius: 250,  // 拍击杀死半径（增加了）
+            zapKillRadius: 100  // 电蚊拍杀死半径
         };
 
         // Game state
@@ -181,6 +182,8 @@
                 this.buzzingGain = null;
                 this.buzzingAudioBuffer = null;
                 this.zapAudioBuffer = null; // 电击音效
+                this.lastZapTime = 0; // 上次播放电击音效的时间
+                this.zapCooldown = 200; // 电击音效冷却时间（毫秒）
 
                 this.resizeCanvas();
                 window.addEventListener('resize', () => this.resizeCanvas());
@@ -349,16 +352,21 @@
                 }
             }
 
-            // Play electric zap sound (3x volume)
+            // Play electric zap sound (6x volume)
             playZapSound() {
                 if (!this.audioContext || !this.zapAudioBuffer) return;
+
+                // 检查冷却时间，避免重复播放
+                const now = Date.now();
+                if (now - this.lastZapTime < this.zapCooldown) return;
+                this.lastZapTime = now;
 
                 const source = this.audioContext.createBufferSource();
                 const gainNode = this.audioContext.createGain();
 
                 source.buffer = this.zapAudioBuffer;
-                // 3倍音量
-                gainNode.gain.setValueAtTime(3.0, this.audioContext.currentTime);
+                // 6倍音量（更大声）
+                gainNode.gain.setValueAtTime(6.0, this.audioContext.currentTime);
 
                 source.connect(gainNode);
                 gainNode.connect(this.audioContext.destination);
@@ -740,9 +748,10 @@
                 });
                 const avgDistance = totalDistance / fingerTips.length;
 
-                // 放宽阈值：握拳时距离约 0.08-0.15，张开手约 0.18-0.3
+                // 进一步放宽阈值：握拳时距离约 0.08-0.15，张开手约 0.18-0.3
+                // 从0.16增加到0.20，更容易检测握拳
                 this.lastFistDistance = avgDistance; // 保存用于调试
-                return avgDistance < 0.16;
+                return avgDistance < 0.20;
             }
 
             render() {
@@ -835,10 +844,29 @@
                     持有电蚊拍: ${this.isHoldingInsecticide ? '是' : '否'}<br>
                 `;
 
+                // 显示电蚊拍位置信息
+                if (this.insecticidePos && this.insecticideOriginalPos) {
+                    const moved = Math.abs(this.insecticidePos.x - this.insecticideOriginalPos.x) > 1 ||
+                                  Math.abs(this.insecticidePos.y - this.insecticideOriginalPos.y) > 1;
+                    debugText += `电蚊拍移动: ${moved ? '是' : '否'} (${Math.round(this.insecticidePos.x)},${Math.round(this.insecticidePos.y)})<br>`;
+                }
+
                 // 显示握拳检测状态
                 if (this.hands.length > 0 && this.lastFistDistance !== undefined) {
-                    const isFist = this.lastFistDistance < 0.16;
-                    debugText += `握拳检测: ${isFist ? '握拳' : '张开'} (${this.lastFistDistance.toFixed(3)})<br>`;
+                    const isFist = this.lastFistDistance < 0.20;
+                    debugText += `握拳检测: ${isFist ? '握拳' : '张开'} (${this.lastFistDistance.toFixed(3)} < 0.20)<br>`;
+                }
+
+                // 显示手到电蚊拍的距离
+                if (this.hands.length > 0 && this.insecticideOriginalPos) {
+                    const handPos = this.hands[0].landmarks[8]; // 食指尖
+                    const handX = (1 - handPos.x) * this.canvas.width;
+                    const handY = handPos.y * this.canvas.height;
+                    const distToSwatter = Math.sqrt(
+                        Math.pow(handX - this.insecticideOriginalPos.x, 2) +
+                        Math.pow(handY - this.insecticideOriginalPos.y, 2)
+                    );
+                    debugText += `手到电蚊拍距离: ${Math.round(distToSwatter)}px (< ${CONFIG.sprayDistance}可拾取)<br>`;
                 }
 
                 // 显示手掌距离（用于调试拍手检测）
@@ -857,14 +885,7 @@
                     });
 
                     const currentDist = this.distance(handPositions[0], handPositions[1]);
-
-                    const prevPos = this.previousHandPositions.map(h => h.palmCenter);
-                    const previousDist = this.distance(prevPos[0], prevPos[1]);
-                    const approachSpeed = previousDist - currentDist;
-
-                    debugText += `手掌距离: ${Math.round(currentDist)}px<br>`;
-                    debugText += `接近速度: ${Math.round(approachSpeed)}px/帧<br>`;
-                    debugText += `拍手阈值: ${CONFIG.clapThreshold}px`;
+                    debugText += `手掌距离: ${Math.round(currentDist)}px`;
                 }
 
                 this.debugInfo.innerHTML = debugText;
