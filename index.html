@@ -246,7 +246,7 @@
 
                 // Load buzzing sound from audio file
                 try {
-                    const response = await fetch('399549__soundslikewillem__electric-mosquito-killer-bat.wav');
+                    const response = await fetch('580629__vilatzara__mosquito1.wav');
                     const arrayBuffer = await response.arrayBuffer();
                     this.buzzingAudioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
                     console.log('Audio loaded successfully');
@@ -381,6 +381,16 @@
                 const offsetX = (this.canvas.width - bgWidth) / 2;
                 const offsetY = (this.canvas.height - bgHeight) / 2;
 
+                // Store background bounds for mosquito movement
+                this.backgroundBounds = {
+                    left: offsetX,
+                    right: offsetX + bgWidth,
+                    top: offsetY,
+                    bottom: offsetY + bgHeight,
+                    width: bgWidth,
+                    height: bgHeight
+                };
+
                 // Position insecticide at a visible location (right side)
                 this.insecticidePos = {
                     x: offsetX + bgWidth * 0.8,
@@ -394,10 +404,19 @@
 
             createMosquitos() {
                 this.mosquitos = [];
+
+                // Make sure background bounds are calculated
+                if (!this.backgroundBounds) {
+                    this.calculateInsecticidePosition();
+                }
+
+                const bounds = this.backgroundBounds;
+                const margin = 50; // Keep mosquito away from edges
+
                 for (let i = 0; i < CONFIG.mosquitoCount; i++) {
                     this.mosquitos.push({
-                        x: Math.random() * this.canvas.width,
-                        y: Math.random() * this.canvas.height,
+                        x: bounds.left + margin + Math.random() * (bounds.width - margin * 2),
+                        y: bounds.top + margin + Math.random() * (bounds.height - margin * 2),
                         vx: (Math.random() - 0.5) * CONFIG.mosquitoSpeed,
                         vy: (Math.random() - 0.5) * CONFIG.mosquitoSpeed,
                         size: CONFIG.mosquitoSize,
@@ -475,6 +494,7 @@
                 if (this.state !== GAME_STATE.PLAYING) return;
 
                 // Update mosquito positions
+                const bounds = this.backgroundBounds;
                 this.mosquitos.forEach(mosquito => {
                     if (!mosquito.alive) return;
 
@@ -482,13 +502,13 @@
                     mosquito.y += mosquito.vy;
                     mosquito.angle += 0.05;
 
-                    // Bounce off walls
-                    if (mosquito.x < 0 || mosquito.x > this.canvas.width) mosquito.vx *= -1;
-                    if (mosquito.y < 0 || mosquito.y > this.canvas.height) mosquito.vy *= -1;
+                    // Bounce off background boundaries
+                    if (mosquito.x < bounds.left || mosquito.x > bounds.right) mosquito.vx *= -1;
+                    if (mosquito.y < bounds.top || mosquito.y > bounds.bottom) mosquito.vy *= -1;
 
-                    // Keep within bounds
-                    mosquito.x = Math.max(0, Math.min(this.canvas.width, mosquito.x));
-                    mosquito.y = Math.max(0, Math.min(this.canvas.height, mosquito.y));
+                    // Keep within background bounds
+                    mosquito.x = Math.max(bounds.left, Math.min(bounds.right, mosquito.x));
+                    mosquito.y = Math.max(bounds.top, Math.min(bounds.bottom, mosquito.y));
                 });
 
                 // Check for hand interactions
@@ -652,15 +672,24 @@
                     this.ctx.restore();
                 }
 
-                // Draw mosquitos as large black dots
+                // Draw mosquitos as large black dots with white border
                 this.mosquitos.forEach(mosquito => {
                     if (!mosquito.alive) return;
 
                     this.ctx.save();
+
+                    // Draw white outline first
+                    this.ctx.fillStyle = '#FFF';
+                    this.ctx.beginPath();
+                    this.ctx.arc(mosquito.x, mosquito.y, mosquito.size / 2 + 3, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // Draw black mosquito on top
                     this.ctx.fillStyle = '#000';
                     this.ctx.beginPath();
                     this.ctx.arc(mosquito.x, mosquito.y, mosquito.size / 2, 0, Math.PI * 2);
                     this.ctx.fill();
+
                     this.ctx.restore();
                 });
 
