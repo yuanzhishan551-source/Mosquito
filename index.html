@@ -135,8 +135,8 @@
             insecticideWidth: 297,
             insecticideHeight: 477,
             insecticideRotation: 21.01,
-            mosquitoCount: 1,  // 只有一只蚊子
-            mosquitoSize: 25,  // 蚊子大小（黑点）25x25
+            mosquitoCount: 5,  // 5只蚊子
+            mosquitoSize: 2.5,  // 蚊子大小（黑点）2.5px
             mosquitoSpeed: 2,
             clapThreshold: 250, // Distance threshold for clap detection (增加了)
             clapSpeedThreshold: 300, // Speed threshold for clap (pixels/frame)
@@ -679,9 +679,9 @@
                 });
                 const avgDistance = totalDistance / fingerTips.length;
 
-                // 如果平均距离小于阈值，认为是握拳
-                // 通常握拳时距离约 0.08-0.12，张开手约 0.15-0.25
-                return avgDistance < 0.13;
+                // 放宽阈值：握拳时距离约 0.08-0.15，张开手约 0.18-0.3
+                this.lastFistDistance = avgDistance; // 保存用于调试
+                return avgDistance < 0.16;
             }
 
             render() {
@@ -734,24 +734,15 @@
                     this.ctx.restore();
                 }
 
-                // Draw mosquitos as large black dots with white border
+                // Draw mosquitos as small black dots (no border)
                 this.mosquitos.forEach(mosquito => {
                     if (!mosquito.alive) return;
 
                     this.ctx.save();
-
-                    // Draw white outline first
-                    this.ctx.fillStyle = '#FFF';
-                    this.ctx.beginPath();
-                    this.ctx.arc(mosquito.x, mosquito.y, mosquito.size / 2 + 3, 0, Math.PI * 2);
-                    this.ctx.fill();
-
-                    // Draw black mosquito on top
                     this.ctx.fillStyle = '#000';
                     this.ctx.beginPath();
-                    this.ctx.arc(mosquito.x, mosquito.y, mosquito.size / 2, 0, Math.PI * 2);
+                    this.ctx.arc(mosquito.x, mosquito.y, mosquito.size, 0, Math.PI * 2);
                     this.ctx.fill();
-
                     this.ctx.restore();
                 });
 
@@ -780,8 +771,14 @@
                     状态: ${this.state}<br>
                     蚊子数量: ${aliveMosquitos}/${this.mosquitos.length}<br>
                     检测到的手: ${this.hands.length}<br>
-                    持有杀虫剂: ${this.isHoldingInsecticide ? '是' : '否'}<br>
+                    持有电蚊拍: ${this.isHoldingInsecticide ? '是' : '否'}<br>
                 `;
+
+                // 显示握拳检测状态
+                if (this.hands.length > 0 && this.lastFistDistance !== undefined) {
+                    const isFist = this.lastFistDistance < 0.16;
+                    debugText += `握拳检测: ${isFist ? '握拳' : '张开'} (${this.lastFistDistance.toFixed(3)})<br>`;
+                }
 
                 // 显示手掌距离（用于调试拍手检测）
                 if (this.hands.length === 2 && this.previousHandPositions.length === 2) {
