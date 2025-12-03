@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蚊子游戏 - Mosquito Interactive Scene</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background: #000;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        #videoElement {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 200px;
+            height: 150px;
+            border: 2px solid #fff;
+            border-radius: 8px;
+            display: none;
+            z-index: 1000;
+        }
+
+        #debugInfo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+            font-family: monospace;
+        }
+
+        #loadingScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            z-index: 2000;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #startButton {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px 40px;
+            font-size: 24px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 2001;
+            display: none;
+        }
+
+        #startButton:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <video id="videoElement" autoplay playsinline></video>
+        <div id="debugInfo"></div>
+        <div id="loadingScreen">
+            <div class="spinner"></div>
+            <div>加载中... Loading resources...</div>
+        </div>
+        <button id="startButton">点击开始 / Click to Start</button>
+    </div>
+
+    <!-- MediaPipe Hands library -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <script>
+        // Game configuration
+        const CONFIG = {
+            backgroundWidth: 2880,
+            backgroundHeight: 2048,
+            insecticideWidth: 297,
+            insecticideHeight: 477,
+            insecticideRotation: 21.01,
+            mosquitoCount: 8,
+            mosquitoSize: 40,
+            mosquitoSpeed: 2,
+            clapThreshold: 100, // Distance threshold for clap detection
+            sprayDistance: 150, // Distance to grab insecticide
+            gameRestartDelay: 2000
+        };
+
+        // Game state
+        const GAME_STATE = {
+            LOADING: 'loading',
+            BLACK_SCREEN: 'black_screen',
+            BUZZING: 'buzzing',
+            EYE_OPENING: 'eye_opening',
+            PLAYING: 'playing',
+            EYE_CLOSING: 'eye_closing',
+            RESTARTING: 'restarting'
+        };
+
+        class MosquitoGame {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.videoElement = document.getElementById('videoElement');
+                this.debugInfo = document.getElementById('debugInfo');
+                this.loadingScreen = document.getElementById('loadingScreen');
+                this.startButton = document.getElementById('startButton');
+
+                this.state = GAME_STATE.LOADING;
+                this.mosquitos = [];
+                this.hands = [];
+                this.backgroundImg = null;
+                this.insecticideImg = null;
+                this.insecticidePos = null;
+                this.isHoldingInsecticide = false;
+                this.eyeOpenProgress = 0;
+                this.audioContext = null;
+                this.buzzingSound = null;
+
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+
+                this.init();
+            }
+
+            resizeCanvas() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            async init() {
+                try {
+                    // Load images
+                    await this.loadImages();
+
+                    // Setup audio
+                    this.setupAudio();
+
+                    // Setup hand tracking
+                    await this.setupHandTracking();
+
+                    // Calculate insecticide position
+                    this.calculateInsecticidePosition();
+
+                    // Show start button
+                    this.loadingScreen.style.display = 'none';
+                    this.startButton.style.display = 'block';
+
+                    this.startButton.addEventListener('click', () => {
+                        this.startButton.style.display = 'none';
+                        this.startGame();
+                    });
+
+                } catch (error) {
+                    console.error('Initialization error:', error);
+                    this.loadingScreen.innerHTML = `<div style="color: red;">加载失败: ${error.message}</div>`;
+                }
+            }
+
+            async loadImages() {
+                return new Promise((resolve, reject) => {
+                    let loaded = 0;
+                    const total = 2;
+
+                    const checkComplete = () => {
+                        loaded++;
+                        if (loaded === total) resolve();
+                    };
+
+                    this.backgroundImg = new Image();
+                    this.backgroundImg.onload = checkComplete;
+                    this.backgroundImg.onerror = () => reject(new Error('Failed to load Background.png'));
+                    this.backgroundImg.src = 'Background.png';
+
+                    this.insecticideImg = new Image();
+                    this.insecticideImg.onload = checkComplete;
+                    this.insecticideImg.onerror = () => reject(new Error('Failed to load insecticide.png'));
+                    this.insecticideImg.src = 'insecticide.png';
+                });
+            }
+
+            setupAudio() {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            // Create buzzing sound using Web Audio API
+            playBuzzingSound() {
+                if (!this.audioContext) return;
+
+                // Create oscillator for buzzing sound
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(200, this.audioContext.currentTime);
+                oscillator.frequency.linearRampToValueAtTime(250, this.audioContext.currentTime + 0.5);
+
+                gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + 0.5);
+                gainNode.gain.linearRampToValueAtTime(0.3, this.audioContext.currentTime + 2.5);
+                gainNode.gain.linearRampToValueAtTime(0, this.audioContext.currentTime + 3);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+
+                oscillator.start();
+                oscillator.stop(this.audioContext.currentTime + 3);
+            }
+
+            async setupHandTracking() {
+                const hands = new Hands({
+                    locateFile: (file) => {
+                        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                    }
+                });
+
+                hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults((results) => this.onHandResults(results));
+
+                const camera = new Camera(this.videoElement, {
+                    onFrame: async () => {
+                        await hands.send({ image: this.videoElement });
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                await camera.start();
+            }
+
+            onHandResults(results) {
+                this.hands = results.multiHandedness && results.multiHandLandmarks
+                    ? results.multiHandLandmarks.map((landmarks, idx) => ({
+                        landmarks: landmarks,
+                        handedness: results.multiHandedness[idx].label
+                    }))
+                    : [];
+            }
+
+            calculateInsecticidePosition() {
+                const scaleX = this.canvas.width / CONFIG.backgroundWidth;
+                const scaleY = this.canvas.height / CONFIG.backgroundHeight;
+                const scale = Math.min(scaleX, scaleY);
+
+                const bgWidth = CONFIG.backgroundWidth * scale;
+                const bgHeight = CONFIG.backgroundHeight * scale;
+                const offsetX = (this.canvas.width - bgWidth) / 2;
+                const offsetY = (this.canvas.height - bgHeight) / 2;
+
+                // Position insecticide at a visible location (right side)
+                this.insecticidePos = {
+                    x: offsetX + bgWidth * 0.8,
+                    y: offsetY + bgHeight * 0.6,
+                    width: CONFIG.insecticideWidth * scale,
+                    height: CONFIG.insecticideHeight * scale,
+                    rotation: CONFIG.insecticideRotation * Math.PI / 180,
+                    scale: scale
+                };
+            }
+
+            createMosquitos() {
+                this.mosquitos = [];
+                for (let i = 0; i < CONFIG.mosquitoCount; i++) {
+                    this.mosquitos.push({
+                        x: Math.random() * this.canvas.width,
+                        y: Math.random() * this.canvas.height,
+                        vx: (Math.random() - 0.5) * CONFIG.mosquitoSpeed,
+                        vy: (Math.random() - 0.5) * CONFIG.mosquitoSpeed,
+                        size: CONFIG.mosquitoSize,
+                        angle: Math.random() * Math.PI * 2,
+                        alive: true
+                    });
+                }
+            }
+
+            startGame() {
+                this.state = GAME_STATE.BLACK_SCREEN;
+                this.eyeOpenProgress = 0;
+                this.createMosquitos();
+
+                // Start with black screen
+                setTimeout(() => {
+                    this.state = GAME_STATE.BUZZING;
+                    this.playBuzzingSound();
+
+                    setTimeout(() => {
+                        this.state = GAME_STATE.EYE_OPENING;
+                        this.animateEyeOpening();
+                    }, 1500);
+                }, 500);
+
+                this.gameLoop();
+            }
+
+            animateEyeOpening() {
+                const duration = 1500; // 1.5 seconds
+                const startTime = Date.now();
+
+                const animate = () => {
+                    const elapsed = Date.now() - startTime;
+                    this.eyeOpenProgress = Math.min(elapsed / duration, 1);
+
+                    if (this.eyeOpenProgress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        this.state = GAME_STATE.PLAYING;
+                    }
+                };
+
+                animate();
+            }
+
+            animateEyeClosing() {
+                const duration = 1000; // 1 second
+                const startTime = Date.now();
+                const startProgress = this.eyeOpenProgress;
+
+                const animate = () => {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    this.eyeOpenProgress = startProgress * (1 - progress);
+
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        this.state = GAME_STATE.RESTARTING;
+                        setTimeout(() => this.startGame(), CONFIG.gameRestartDelay);
+                    }
+                };
+
+                animate();
+            }
+
+            gameLoop() {
+                this.update();
+                this.render();
+                requestAnimationFrame(() => this.gameLoop());
+            }
+
+            update() {
+                if (this.state !== GAME_STATE.PLAYING) return;
+
+                // Update mosquito positions
+                this.mosquitos.forEach(mosquito => {
+                    if (!mosquito.alive) return;
+
+                    mosquito.x += mosquito.vx;
+                    mosquito.y += mosquito.vy;
+                    mosquito.angle += 0.05;
+
+                    // Bounce off walls
+                    if (mosquito.x < 0 || mosquito.x > this.canvas.width) mosquito.vx *= -1;
+                    if (mosquito.y < 0 || mosquito.y > this.canvas.height) mosquito.vy *= -1;
+
+                    // Keep within bounds
+                    mosquito.x = Math.max(0, Math.min(this.canvas.width, mosquito.x));
+                    mosquito.y = Math.max(0, Math.min(this.canvas.height, mosquito.y));
+                });
+
+                // Check for hand interactions
+                this.checkHandInteractions();
+
+                // Check if all mosquitos are dead
+                const allDead = this.mosquitos.every(m => !m.alive);
+                if (allDead && this.state === GAME_STATE.PLAYING) {
+                    this.state = GAME_STATE.EYE_CLOSING;
+                    this.animateEyeClosing();
+                }
+            }
+
+            checkHandInteractions() {
+                if (this.hands.length === 0) return;
+
+                // Get hand positions in canvas coordinates
+                const handPositions = this.hands.map(hand => {
+                    const wrist = hand.landmarks[0];
+                    const indexTip = hand.landmarks[8];
+                    return {
+                        wrist: {
+                            x: wrist.x * this.canvas.width,
+                            y: wrist.y * this.canvas.height
+                        },
+                        indexTip: {
+                            x: indexTip.x * this.canvas.width,
+                            y: indexTip.y * this.canvas.height
+                        },
+                        handedness: hand.handedness
+                    };
+                });
+
+                // Check for clapping (two hands close together)
+                if (handPositions.length === 2) {
+                    const dist = this.distance(
+                        handPositions[0].indexTip,
+                        handPositions[1].indexTip
+                    );
+
+                    if (dist < CONFIG.clapThreshold) {
+                        const clapCenter = {
+                            x: (handPositions[0].indexTip.x + handPositions[1].indexTip.x) / 2,
+                            y: (handPositions[0].indexTip.y + handPositions[1].indexTip.y) / 2
+                        };
+
+                        this.checkMosquitoKill(clapCenter, 100);
+                    }
+                }
+
+                // Check for grabbing insecticide
+                handPositions.forEach(hand => {
+                    const distToInsecticide = this.distance(hand.indexTip, this.insecticidePos);
+
+                    if (distToInsecticide < CONFIG.sprayDistance) {
+                        this.isHoldingInsecticide = true;
+                        // Check mosquitos in a cone in front of spray
+                        this.mosquitos.forEach(mosquito => {
+                            if (!mosquito.alive) return;
+                            const distToMosquito = this.distance(hand.indexTip, mosquito);
+                            if (distToMosquito < 200) {
+                                mosquito.alive = false;
+                            }
+                        });
+                    } else {
+                        this.isHoldingInsecticide = false;
+                    }
+                });
+            }
+
+            checkMosquitoKill(position, radius) {
+                this.mosquitos.forEach(mosquito => {
+                    if (!mosquito.alive) return;
+                    const dist = this.distance(position, mosquito);
+                    if (dist < radius) {
+                        mosquito.alive = false;
+                    }
+                });
+            }
+
+            distance(p1, p2) {
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+
+            render() {
+                // Clear canvas
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                if (this.state === GAME_STATE.LOADING || this.state === GAME_STATE.BLACK_SCREEN) {
+                    return;
+                }
+
+                // Calculate eye opening effect
+                let visibleHeight = this.canvas.height;
+                if (this.state === GAME_STATE.EYE_OPENING || this.state === GAME_STATE.EYE_CLOSING) {
+                    visibleHeight = this.canvas.height * this.eyeOpenProgress;
+                }
+
+                this.ctx.save();
+                this.ctx.beginPath();
+                const yOffset = (this.canvas.height - visibleHeight) / 2;
+                this.ctx.rect(0, yOffset, this.canvas.width, visibleHeight);
+                this.ctx.clip();
+
+                // Draw background
+                if (this.backgroundImg) {
+                    const scaleX = this.canvas.width / CONFIG.backgroundWidth;
+                    const scaleY = this.canvas.height / CONFIG.backgroundHeight;
+                    const scale = Math.min(scaleX, scaleY);
+
+                    const bgWidth = CONFIG.backgroundWidth * scale;
+                    const bgHeight = CONFIG.backgroundHeight * scale;
+                    const offsetX = (this.canvas.width - bgWidth) / 2;
+                    const offsetY = (this.canvas.height - bgHeight) / 2;
+
+                    this.ctx.drawImage(this.backgroundImg, offsetX, offsetY, bgWidth, bgHeight);
+                }
+
+                // Draw insecticide
+                if (this.insecticideImg && this.insecticidePos) {
+                    this.ctx.save();
+                    this.ctx.translate(this.insecticidePos.x, this.insecticidePos.y);
+                    this.ctx.rotate(this.insecticidePos.rotation);
+                    this.ctx.drawImage(
+                        this.insecticideImg,
+                        -this.insecticidePos.width / 2,
+                        -this.insecticidePos.height / 2,
+                        this.insecticidePos.width,
+                        this.insecticidePos.height
+                    );
+                    this.ctx.restore();
+                }
+
+                // Draw mosquitos
+                this.mosquitos.forEach(mosquito => {
+                    if (!mosquito.alive) return;
+
+                    this.ctx.save();
+                    this.ctx.translate(mosquito.x, mosquito.y);
+                    this.ctx.rotate(mosquito.angle);
+
+                    // Draw simple mosquito shape
+                    // Body
+                    this.ctx.fillStyle = '#333';
+                    this.ctx.beginPath();
+                    this.ctx.ellipse(0, 0, mosquito.size * 0.3, mosquito.size * 0.15, 0, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // Wings
+                    this.ctx.fillStyle = 'rgba(200, 200, 255, 0.5)';
+                    this.ctx.beginPath();
+                    this.ctx.ellipse(-mosquito.size * 0.2, 0, mosquito.size * 0.4, mosquito.size * 0.2, Math.PI / 4, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    this.ctx.beginPath();
+                    this.ctx.ellipse(mosquito.size * 0.2, 0, mosquito.size * 0.4, mosquito.size * 0.2, -Math.PI / 4, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // Proboscis
+                    this.ctx.strokeStyle = '#222';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(mosquito.size * 0.3, 0);
+                    this.ctx.lineTo(mosquito.size * 0.5, 0);
+                    this.ctx.stroke();
+
+                    this.ctx.restore();
+                });
+
+                // Draw hands
+                this.hands.forEach(hand => {
+                    hand.landmarks.forEach((landmark, idx) => {
+                        const x = landmark.x * this.canvas.width;
+                        const y = landmark.y * this.canvas.height;
+
+                        this.ctx.fillStyle = idx === 8 ? '#00FF00' : '#FF0000';
+                        this.ctx.beginPath();
+                        this.ctx.arc(x, y, 5, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    });
+                });
+
+                this.ctx.restore();
+
+                // Draw debug info
+                this.updateDebugInfo();
+            }
+
+            updateDebugInfo() {
+                const aliveMosquitos = this.mosquitos.filter(m => m.alive).length;
+                this.debugInfo.innerHTML = `
+                    状态: ${this.state}<br>
+                    蚊子数量: ${aliveMosquitos}/${this.mosquitos.length}<br>
+                    检测到的手: ${this.hands.length}<br>
+                    持有杀虫剂: ${this.isHoldingInsecticide ? '是' : '否'}
+                `;
+            }
+        }
+
+        // Start the game when page loads
+        window.addEventListener('load', () => {
+            new MosquitoGame();
+        });
+    </script>
+</body>
+</html>
